@@ -257,3 +257,13 @@ if __name__ == '__main__':
 ![Salida_ObtenerReg](image.png)
 
 ---
+
+# **Análisis de Vida Útil (_Liveness Analysis_)**
+
+- **Qué es:** técnica de análisis de flujo de datos que determina, para cada punto del programa, qué variables están **vivas** (su valor **será usado** más adelante).
+- **Cómo ayuda:** permite
+  - construir **rangos de vida** por variable;
+  - derivar un **grafo de interferencia** (aristas entre variables vivas al mismo tiempo);
+  - aplicar **coloración de grafos** para asignar registros (cada color = un registro);
+  - decidir **qué valores derramar** cuando el número de variables vivas excede el número de registros (heurísticas: costo de recomputar, frecuencia de uso, proximidad del próximo uso).
+- **Beneficio:** reduce _spilling_ y movimientos innecesarios, maximizando reutilización y manteniendo en registros las variables más “caras” o con próximos usos más cercanos.
