@@ -9,7 +9,7 @@
 
 ---
 
-## Objetivos de aprendizaje
+## Objetivos de aprendizaje (resumen)
 
 - Comprender cómo `obtenReg` decide la asignación de registros y cuándo realizar _spilling_.
 - Detectar por qué una mala gestión de registros provoca ineficiencias.
@@ -121,3 +121,139 @@ ST  d, R2           # d := R2
 ```
 
 **Propiedad:** no se derraman temporales (`t`, `u`, `v`) a memoria; solo se hacen las asignaciones finales requeridas a `a` y `d`.
+
+---
+
+## Generación de Código Máquina (continuación con 3 registros)
+
+**Java de entrada:**
+
+```java
+int a = 4;
+int b = 8;
+int c = a + b;
+int d = c - a;
+int e = d + b;
+int f = e + c;
+int g = f - d;
+int h = g + e;
+```
+
+**Inicio dado:**
+
+```asm
+LDI R1, 4          # a = 4
+LDI R2, 8          # b = 8
+ADD R3, R1, R2     # c = a + b
+SUB R1, R3, R1     # d = c - a
+# En este punto: R1=d, R2=b, R3=c
+```
+
+# **Continuación (sin _spilling_, solo R1–R3):**
+
+```asm
+# e = d + b
+ADD R2, R1, R2     # R2 = e ; b no se usa más
+
+# f = e + c
+ADD R3, R2, R3     # R3 = f ; c no se usa más
+
+# g = f - d
+SUB R3, R3, R1     # R3 = g ; f no se usa más
+
+# h = g + e
+ADD R1, R3, R2     # R1 = h ; resultado final en R1
+```
+
+**Mapa de registros final:** `R1=h`, `R2=e`, `R3=g`.  
+**Observación:** se preservan en registros las variables con vida útil más larga y se sobre-escriben los valores muertos.
+
+---
+
+## Implementación en Python — Esqueleto funcional de `obtenReg`
+
+A continuación, se muestra una **implementación simple** de un asignador con 3 registros (`R1`, `R2`, `R3`) que:
+
+- Reutiliza si la variable ya está asignada.
+- Asigna un registro libre si existe.
+- Si no hay libres, realiza _spilling_ con una política **FIFO** (sirve para el caso de prueba pedido).
+
+```python
+class RegisterAllocator:
+    def __init__(self):
+        # Registros disponibles y mapeos
+        self.registers = ["R1", "R2", "R3"]
+        self.reg_to_var = {r: None for r in self.registers}
+        self.var_to_reg = {}
+        # "Memoria" simbólica donde caen los derrames
+        self.memory = set()
+        # Orden de asignación (para política FIFO)
+        self.allocation_order = []
+
+    def _find_free_register(self):
+        for r in self.registers:
+            if self.reg_to_var[r] is None:
+                return r
+        return None
+
+    def get_register(self, variable: str) -> str:
+        # Si ya está asignada, devolver el registro actual
+        if variable in self.var_to_reg:
+            return self.var_to_reg[variable]
+
+        # Buscar registro libre
+        free = self._find_free_register()
+        if free is not None:
+            # Asignar variable al registro libre
+            self.reg_to_var[free] = variable
+            self.var_to_reg[variable] = free
+            self.allocation_order.append(variable)
+            return free
+
+        # No hay libres: derramar y asignar
+        return self.spill_and_assign(variable)
+
+    def spill_and_assign(self, variable: str) -> str:
+        # Política FIFO: derramar la variable más antigua
+        victim_var = self.allocation_order.pop(0)
+        victim_reg = self.var_to_reg[victim_var]
+
+        # "Guardar" a memoria simbólica
+        self.memory.add(victim_var)
+
+        # Liberar estructuras de mapeo
+        del self.var_to_reg[victim_var]
+        self.reg_to_var[victim_reg] = None
+
+        # Asignar la nueva variable al registro liberado
+        self.reg_to_var[victim_reg] = variable
+        self.var_to_reg[variable] = victim_reg
+        self.allocation_order.append(variable)
+        return victim_reg
+
+    def __str__(self) -> str:
+        lines = ["<RegisterAllocator>"]
+        lines.append("  Registros:")
+        for r in self.registers:
+            lines.append(f"    {r}: {self.reg_to_var[r]}")
+        lines.append("  Memoria (derramados):")
+        mem_list = ", ".join(sorted(self.memory)) if self.memory else "—"
+        lines.append(f"    {mem_list}")
+        return "\n".join(lines)
+
+
+# Casos de prueba solicitados
+if __name__ == '__main__':
+    allocator = RegisterAllocator()
+    print('a ->', allocator.get_register('a'))  # Esperado: R1
+    print('b ->', allocator.get_register('b'))  # Esperado: R2
+    print('c ->', allocator.get_register('c'))  # Esperado: R3
+    print('d ->', allocator.get_register('d'))  # Esperado: derrama 'a' y asigna R1
+    print(allocator)
+```
+
+**Salida:**
+
+![Salida_ObtenerReg](image.png)
+
+---
